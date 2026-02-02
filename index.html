@@ -1,15 +1,15 @@
 <!doctype html>
 <html lang="he" dir="rtl">
 <head>
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-R3ZYXHRQFC"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
+  <!-- Google tag (gtag.js) -->
+  <script async src="https://www.googletagmanager.com/gtag/js?id=G-R3ZYXHRQFC"></script>
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    gtag('js', new Date());
+    gtag('config', 'G-R3ZYXHRQFC');
+  </script>
 
-  gtag('config', 'G-R3ZYXHRQFC');
-</script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>עדכונים הפקות שטילר & רון</title>
@@ -95,11 +95,10 @@
       position:relative;
     }
 
-    /* ✅ פתרון לתמונות מכל יחס:
-       רקע blur מהתמונה + תמונה במרכז ב-contain (לא נחתכת) */
+    /* images: blurred background + contain main image */
     .imgWrap{
       width:100%;
-      aspect-ratio: 16 / 9;      /* יחס אחיד לכל כרטיס */
+      aspect-ratio: 16 / 9;
       position: relative;
       overflow: hidden;
       background: rgba(255,255,255,.06);
@@ -107,7 +106,7 @@
     .imgWrap::before{
       content:"";
       position:absolute;
-      inset:-24px;               /* כדי שהבלר לא יראה קצוות */
+      inset:-24px;
       background-image: var(--bgimg);
       background-size: cover;
       background-position: center;
@@ -120,7 +119,7 @@
       inset:0;
       width:100%;
       height:100%;
-      object-fit: contain;       /* חשוב: בלי חיתוך */
+      object-fit: contain;
       object-position: center;
       display:block;
     }
@@ -186,15 +185,31 @@
       padding: 6px 10px;
       background: rgba(0,0,0,.12);
     }
-    footer{
-      border-top: 1px solid var(--line);
-      padding: 18px 16px 26px;
-      color: var(--muted);
-      font-size: 12px;
-      max-width: 1040px;
-      margin: 0 auto;
+
+    /* ✅ Toast */
+    .toast{
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      background: rgba(0,0,0,.75);
+      color: #fff;
+      border: 1px solid rgba(255,255,255,.18);
+      padding: 10px 14px;
+      border-radius: 999px;
+      font-weight: 800;
+      font-size: 13px;
+      box-shadow: 0 16px 40px rgba(0,0,0,.45);
+      backdrop-filter: blur(10px);
+      z-index: 999;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity .18s ease, transform .18s ease;
     }
-    .note{ line-height: 1.5; }
+    .toast.show{
+      opacity: 1;
+      transform: translateX(-50%) translateY(-6px);
+    }
   </style>
 </head>
 
@@ -219,9 +234,10 @@
         <option value="newest">עבר: הכי חדש למעלה</option>
         <option value="oldest">עבר: הכי ישן למעלה</option>
       </select>
-		<a class="btn ghost" href="https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ" target="_blank" rel="noopener">
-  👥 להצטרפות לקהילה
-</a>    </div>
+      <a class="btn ghost" href="https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ" target="_blank" rel="noopener">
+        👥 להצטרפות לקהילה
+      </a>
+    </div>
   </div>
 </header>
 
@@ -259,6 +275,8 @@
   </section>
 </main>
 
+<div id="toast" class="toast">✅ הועתק</div>
+
 <script>
   const upcomingGrid = document.getElementById('upcomingGrid');
   const pastGrid = document.getElementById('pastGrid');
@@ -273,6 +291,19 @@
   const upcomingCount = document.getElementById('upcomingCount');
   const pastCount = document.getElementById('pastCount');
   const togglePastBtn = document.getElementById('togglePast');
+
+  const toastEl = document.getElementById('toast');
+  let toastTimer = null;
+
+  // holds folder -> { folder, meta, dt }
+  const EVENT_MAP = new Map();
+
+  function showToast(msg){
+    toastEl.textContent = msg;
+    toastEl.classList.add('show');
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => toastEl.classList.remove('show'), 1200);
+  }
 
   function esc(s) {
     return String(s ?? '').replace(/[&<>"']/g, m => ({
@@ -297,6 +328,80 @@
     return Math.floor((a - b) / ms);
   }
 
+  // ---------- ICS (Add to Calendar) ----------
+  function pad2(n){ return String(n).padStart(2,'0'); }
+  function icsDateLocal(d){
+    // YYYYMMDDTHHMMSS
+    return `${d.getFullYear()}${pad2(d.getMonth()+1)}${pad2(d.getDate())}T${pad2(d.getHours())}${pad2(d.getMinutes())}00`;
+  }
+  function icsEscape(s){
+    return String(s ?? '')
+      .replace(/\\/g, '\\\\')
+      .replace(/\n/g, '\\n')
+      .replace(/,/g, '\\,')
+      .replace(/;/g, '\\;');
+  }
+  function buildICS(folder, e){
+    const tz = "Asia/Jerusalem";
+    const dtStart = parseLocalDate(e.date, e.time);
+    // default duration: 4 hours
+    const dtEnd = new Date(dtStart.getTime() + 4 * 60 * 60 * 1000);
+
+    const title = e.title || "Event";
+    const location = e.location || "";
+    const url = e.ticket_url || "";
+    const coupon = e.coupon_code ? `Coupon: ${e.coupon_code}` : "";
+    const descriptionParts = [
+      e.description || "",
+      coupon,
+      url ? `Tickets: ${url}` : ""
+    ].filter(Boolean);
+    const description = descriptionParts.join("\\n\\n");
+
+    const uid = `${folder}@promo-site`;
+    const now = new Date();
+
+    return [
+      "BEGIN:VCALENDAR",
+      "VERSION:2.0",
+      "PRODID:-//promo-site//events//HE",
+      "CALSCALE:GREGORIAN",
+      "METHOD:PUBLISH",
+      "BEGIN:VEVENT",
+      `UID:${icsEscape(uid)}`,
+      `DTSTAMP:${icsDateLocal(now)}`,
+      `DTSTART;TZID=${tz}:${icsDateLocal(dtStart)}`,
+      `DTEND;TZID=${tz}:${icsDateLocal(dtEnd)}`,
+      `SUMMARY:${icsEscape(title)}`,
+      location ? `LOCATION:${icsEscape(location)}` : "",
+      description ? `DESCRIPTION:${icsEscape(description)}` : "",
+      url ? `URL:${icsEscape(url)}` : "",
+      "END:VEVENT",
+      "END:VCALENDAR"
+    ].filter(Boolean).join("\r\n");
+  }
+
+  function downloadICS(folder){
+    const item = EVENT_MAP.get(folder);
+    if (!item) return;
+
+    const ics = buildICS(folder, item.meta);
+    const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${folder}.ics`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+
+    setTimeout(() => URL.revokeObjectURL(url), 1200);
+
+    showToast("📅 הקובץ ירד ליומן");
+    try { gtag('event', 'add_to_calendar', { event_folder: folder }); } catch {}
+  }
+
   function card(e, folder, isPast) {
     const dt = parseLocalDate(e.date, e.time);
     const now = new Date();
@@ -307,13 +412,18 @@
 
     const imagePath = e.image ? `events/${folder}/${e.image}` : '';
     const couponBtn = e.coupon_code ? `
-      <button class="btn" data-copy="${esc(e.coupon_code)}">🎟️ העתק קופון: ${esc(e.coupon_code)}</button>
+      <button class="btn copy-btn" data-copy="${esc(e.coupon_code)}">🎟️ העתק קופון</button>
     ` : '';
 
     const ticketsBtn = (e.ticket_url && !isPast) ? `
       <a class="btn primary" href="${esc(e.ticket_url)}" target="_blank" rel="noopener">כרטיסים</a>
     ` : (e.ticket_url && isPast) ? `
       <a class="btn primary" href="${esc(e.ticket_url)}" target="_blank" rel="noopener">לינק לאירוע</a>
+    ` : '';
+
+    // ✅ Add to calendar (works for upcoming; you can allow past too, but usually not needed)
+    const calendarBtn = !isPast ? `
+      <button class="btn ics-btn" data-folder="${esc(folder)}">📅 הוסף ליומן</button>
     ` : '';
 
     const promoterBtn = e.promoter_url ? `
@@ -345,6 +455,7 @@
           <div class="actions">
             ${ticketsBtn}
             ${couponBtn}
+            ${calendarBtn}
             ${promoterBtn}
           </div>
         </div>
@@ -352,18 +463,26 @@
     `;
   }
 
-  function wireCopyButtons() {
+  function wireButtons() {
+    // copy coupon -> toast
     document.querySelectorAll('[data-copy]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const code = btn.getAttribute('data-copy');
         try {
           await navigator.clipboard.writeText(code);
-          const old = btn.textContent;
-          btn.textContent = '✅ הועתק';
-          setTimeout(() => btn.textContent = old, 1100);
+          showToast('✅ קופון הועתק');
+          try { gtag('event', 'copy_coupon', { coupon: code }); } catch {}
         } catch {
           alert('לא הצלחתי להעתיק אוטומטית. הקוד: ' + code);
         }
+      });
+    });
+
+    // add to calendar
+    document.querySelectorAll('.ics-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const folder = btn.getAttribute('data-folder');
+        downloadICS(folder);
       });
     });
   }
@@ -408,18 +527,22 @@
     upcomingCount.textContent = `${upcoming.length} אירועים`;
     pastCount.textContent = `${past.length} אירועים`;
 
-    wireCopyButtons();
+    wireButtons();
   }
 
   async function init() {
     const folders = await fetchJson('events/index.json');
 
     const all = [];
+    EVENT_MAP.clear();
+
     for (const folder of folders) {
       try {
         const meta = await fetchJson(`events/${folder}/meta.json`);
         const dt = parseLocalDate(meta.date, meta.time);
-        all.push({ folder, meta, dt });
+        const item = { folder, meta, dt };
+        all.push(item);
+        EVENT_MAP.set(folder, item);
       } catch (e) {
         console.warn('Failed loading event:', folder, e);
       }
