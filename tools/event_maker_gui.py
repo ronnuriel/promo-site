@@ -14,7 +14,7 @@ from tkinter import filedialog, messagebox
 # CONFIG (EDIT THESE)
 # =============================
 UPSTREAM_REPO = "ronnuriel/promo-site"   # PR target (your main repo)
-DEFAULT_BRANCH = "main"                 # usually "main"
+DEFAULT_BRANCH = "main"                 # usually main
 
 # Make GUI apps (PyInstaller .app) see Homebrew paths too
 EXTRA_PATHS = ["/opt/homebrew/bin", "/usr/local/bin", "/usr/bin", "/bin"]
@@ -32,7 +32,7 @@ except Exception:
 # =============================
 def find_repo_root(start: Path) -> Path | None:
     p = start.resolve()
-    for _ in range(50):
+    for _ in range(80):
         if (p / ".git").exists():
             return p
         p = p.parent
@@ -94,11 +94,6 @@ def run_cmd(cmd: list[str], cwd: str, log_fn):
         raise RuntimeError(f"Command failed: {' '.join(cmd)}")
 
 
-def gh_authed(repo_cwd: str) -> bool:
-    p = subprocess.run([tool_path("gh"), "auth", "status"], cwd=repo_cwd, text=True, capture_output=True)
-    return p.returncode == 0
-
-
 def slugify(text: str) -> str:
     text = text.strip().lower()
     text = text.replace("&", " and ")
@@ -128,13 +123,6 @@ def validate_time(time_str: str) -> str:
     return s
 
 
-def default_events_root() -> str:
-    root = find_repo_root(app_start_dir()) or find_repo_root(Path.cwd())
-    if root:
-        return str(root / "events")
-    return os.path.join(os.path.expanduser("~"), "Desktop", "events")
-
-
 def get_origin_url(repo: str) -> str:
     p = subprocess.run([tool_path("git"), "remote", "get-url", "origin"], cwd=repo, text=True, capture_output=True)
     return (p.stdout or "").strip()
@@ -142,27 +130,38 @@ def get_origin_url(repo: str) -> str:
 
 def ensure_origin_is_fork(repo: str):
     """
-    Safety: partner should push to their fork (origin), not to upstream repo.
+    Safety: partner should push to their fork (origin), not to your upstream repo.
     """
     origin = get_origin_url(repo)
     if "ronnuriel/promo-site" in origin:
         raise RuntimeError(
             "ה-origin מצביע על הריפו הראשי (ronnuriel/promo-site).\n"
-            "כדי לעבוד נכון צריך לעבוד מתוך Fork (origin צריך להיות הפורק שלך)."
+            "כדי לעבוד נכון צריך לעבוד מתוך Fork.\n"
+            "בפורק, origin צריך להצביע לריפו של החבר, לא אליך."
         )
+
+
+def gh_authed(repo_cwd: str) -> bool:
+    p = subprocess.run([tool_path("gh"), "auth", "status"], cwd=repo_cwd, text=True, capture_output=True)
+    return p.returncode == 0
+
+
+def default_events_root() -> str:
+    root = find_repo_root(app_start_dir()) or find_repo_root(Path.cwd())
+    if root:
+        return str(root / "events")
+    return os.path.join(os.path.expanduser("~"), "Desktop", "events")
 
 
 def sync_to_main_local(repo: str, log_fn):
     """
-    Always start from main locally (even if gh not logged in).
+    Always start from main locally.
     """
-    log_fn(f"Force checkout {DEFAULT_BRANCH} ...")
-    try:
-        run_cmd([tool_path("git"), "checkout", DEFAULT_BRANCH], cwd=repo, log_fn=log_fn)
-    except Exception as e:
-        log_fn(f"Warning: checkout failed: {e}")
+    log_fn(f"Checkout {DEFAULT_BRANCH} ...")
+    run_cmd([tool_path("git"), "checkout", DEFAULT_BRANCH], cwd=repo, log_fn=log_fn)
 
-    log_fn("Pull from origin (fork) ...")
+    log_fn("Pull latest from origin (fork) ...")
+    # if branch exists and clean FF-only will keep safe
     try:
         run_cmd([tool_path("git"), "pull", "--ff-only"], cwd=repo, log_fn=log_fn)
     except Exception as e:
@@ -171,13 +170,28 @@ def sync_to_main_local(repo: str, log_fn):
 
 def sync_fork_with_upstream(repo: str, log_fn):
     """
-    Best-effort: align fork with upstream repo using gh.
+    Best-effort: align the fork with its upstream using gh (runs in fork repo).
     """
-    log_fn(f"Sync fork from upstream: {UPSTREAM_REPO} ({DEFAULT_BRANCH}) ...")
+    log_fn("Sync fork with upstream via `gh repo sync` ...")
     try:
-        run_cmd([tool_path("gh"), "repo", "sync", "--repo", UPSTREAM_REPO, "-b", DEFAULT_BRANCH], cwd=repo, log_fn=log_fn)
+        run_cmd([tool_path("gh"), "repo", "sync", "-b", DEFAULT_BRANCH], cwd=repo, log_fn=log_fn)
     except Exception as e:
         log_fn(f"Warning: gh repo sync failed (continuing): {e}")
+
+
+def has_changes_in_events(repo: str) -> bool:
+    p = subprocess.run([tool_path("git"), "status", "--porcelain", "events/"], cwd=repo, text=True, capture_output=True)
+    return p.returncode == 0 and bool(p.stdout.strip())
+
+
+def fork_owner_login(repo: str) -> str:
+    p = subprocess.run(
+        [tool_path("gh"), "repo", "view", "--json", "owner", "-q", ".owner.login"],
+        cwd=repo, text=True, capture_output=True
+    )
+    if p.returncode != 0 or not p.stdout.strip():
+        raise RuntimeError("לא הצלחתי לזהות owner של הפורק (gh repo view).")
+    return p.stdout.strip()
 
 
 # =============================
@@ -187,8 +201,8 @@ class App(tk.Tk):
     def __init__(self):
         super().__init__()
         self.title("Event Folder Maker")
-        self.geometry("620x920")
-        self.minsize(620, 880)
+        self.geometry("640x940")
+        self.minsize(640, 900)
         self.resizable(True, True)
 
         self.image_path = tk.StringVar(value="")
@@ -222,14 +236,14 @@ class App(tk.Tk):
         imgfrm = tk.Frame(self)
         imgfrm.pack(fill="x", padx=14, pady=4)
         tk.Label(imgfrm, text="תמונה/פלייר*").grid(row=0, column=0, sticky="w")
-        tk.Entry(imgfrm, textvariable=self.image_path, width=56).grid(row=1, column=0, sticky="w", pady=4)
+        tk.Entry(imgfrm, textvariable=self.image_path, width=58).grid(row=1, column=0, sticky="w", pady=4)
         tk.Button(imgfrm, text="בחר קובץ…", command=self.pick_image).grid(row=1, column=1, padx=8)
 
         outfrm = tk.Frame(self)
         outfrm.pack(fill="x", padx=14, pady=4)
         tk.Label(outfrm, text="איפה ליצור את התיקיות (ברירת מחדל: events בתוך הריפו)").grid(row=0, column=0, sticky="w")
         self.out_root = tk.StringVar(value=default_events_root())
-        tk.Entry(outfrm, textvariable=self.out_root, width=56).grid(row=1, column=0, sticky="w", pady=4)
+        tk.Entry(outfrm, textvariable=self.out_root, width=58).grid(row=1, column=0, sticky="w", pady=4)
         tk.Button(outfrm, text="בחר…", command=self.pick_out_root).grid(row=1, column=1, padx=8)
 
         optfrm = tk.Frame(self)
@@ -258,7 +272,7 @@ class App(tk.Tk):
 
         tk.Button(
             btnfrm,
-            text="🔄 Sync עכשיו (להתחיל מ-main)",
+            text="🔄 Sync עכשיו (לעבור ל-main + pull + sync fork)",
             command=self.manual_sync
         ).pack(fill="x", pady=6)
 
@@ -274,7 +288,7 @@ class App(tk.Tk):
                 "הערות:\n"
                 f"- PR תמיד נפתח אל: {UPSTREAM_REPO}:{DEFAULT_BRANCH}\n"
                 "- Push+PR עובד רק בתוך Clone אמיתי (לא ZIP) + git + gh.\n"
-                "- אם gh לא מחובר: לחץ על 'התחבר ל-GitHub'."
+                "- האפליקציה תמיד חוזרת ל-main בסיום PR.\n"
             ),
             fg="#666",
             justify="left"
@@ -288,7 +302,7 @@ class App(tk.Tk):
         loglbl = tk.Label(self, text="Log", font=("Arial", 11, "bold"))
         loglbl.pack(padx=14, pady=(8, 4), anchor="w")
 
-        self.log = tk.Text(self, height=18, width=100)
+        self.log = tk.Text(self, height=20, width=110)
         self.log.pack(fill="both", expand=True, padx=14, pady=(0, 14))
 
     def _row(self, parent, label, default, multiline=False):
@@ -297,7 +311,7 @@ class App(tk.Tk):
         tk.Label(frame, text=label).pack(anchor="w")
 
         if multiline:
-            txt = tk.Text(frame, height=4, width=74)
+            txt = tk.Text(frame, height=4, width=76)
             txt.insert("1.0", default)
             txt.pack(fill="x")
 
@@ -310,7 +324,7 @@ class App(tk.Tk):
             return TVar()
         else:
             var = tk.StringVar(value=default)
-            tk.Entry(frame, textvariable=var, width=82).pack(fill="x")
+            tk.Entry(frame, textvariable=var, width=86).pack(fill="x")
             return var
 
     def log_line(self, s: str):
@@ -332,7 +346,6 @@ class App(tk.Tk):
             self.out_root.set(d)
 
     def _detect_repo(self) -> str | None:
-        # Prefer events root, then cwd, then app location
         candidates = [
             Path(self.out_root.get()) if self.out_root.get().strip() else Path.cwd(),
             Path.cwd(),
@@ -345,36 +358,34 @@ class App(tk.Tk):
         return None
 
     # =============================
-    # Startup / Manual Sync
+    # Sync
     # =============================
     def startup_sync(self):
         self.log_line("---- Startup Sync ----")
+        try:
+            repo = self._detect_repo()
+            if not repo:
+                self.log_line("No .git found (not a clone). Skipping sync.")
+                return
+            if not command_exists("git"):
+                self.log_line("git missing. Skipping sync.")
+                return
 
-        repo = self._detect_repo()
-        if not repo:
-            self.log_line("No .git found (not a clone). Skipping sync.")
-            return
+            sync_to_main_local(repo, self.log_line)
 
-        if not command_exists("git"):
-            self.log_line("git missing. Skipping sync.")
-            return
+            if command_exists("gh") and gh_authed(repo):
+                try:
+                    ensure_origin_is_fork(repo)
+                    sync_fork_with_upstream(repo, self.log_line)
+                    sync_to_main_local(repo, self.log_line)
+                except Exception as e:
+                    self.log_line(f"Warning: upstream sync skipped/failed: {e}")
+            else:
+                self.log_line("gh missing/not authed -> skipping upstream sync.")
 
-        # Always start from main locally
-        sync_to_main_local(repo, self.log_line)
-
-        # If gh exists and is authed, also align fork with upstream
-        if command_exists("gh") and gh_authed(repo):
-            try:
-                ensure_origin_is_fork(repo)
-                sync_fork_with_upstream(repo, self.log_line)
-                # after syncing fork, pull again to get the updated fork
-                sync_to_main_local(repo, self.log_line)
-            except Exception as e:
-                self.log_line(f"Warning: upstream sync skipped/failed: {e}")
-        else:
-            self.log_line("gh missing/not authed -> skipping upstream sync (local main is ok).")
-
-        self.log_line("Startup sync done ✅")
+            self.log_line("Startup sync done ✅")
+        except Exception as e:
+            self.log_line(f"Startup sync error: {e}")
 
     def manual_sync(self):
         try:
@@ -387,12 +398,14 @@ class App(tk.Tk):
 
             sync_to_main_local(repo, self.log_line)
 
-            if command_exists("gh"):
-                if not gh_authed(repo):
-                    raise RuntimeError("gh לא מחובר. לחץ 'התחבר ל-GitHub'.")
-                ensure_origin_is_fork(repo)
-                sync_fork_with_upstream(repo, self.log_line)
-                sync_to_main_local(repo, self.log_line)
+            if not command_exists("gh"):
+                raise RuntimeError("חסר gh. התקן GitHub CLI.")
+            if not gh_authed(repo):
+                raise RuntimeError("gh לא מחובר. לחץ 'התחבר ל-GitHub'.")
+            ensure_origin_is_fork(repo)
+
+            sync_fork_with_upstream(repo, self.log_line)
+            sync_to_main_local(repo, self.log_line)
 
             messagebox.showinfo("Sync", "הסנכרון בוצע ✅")
         except Exception as e:
@@ -408,7 +421,7 @@ class App(tk.Tk):
             if not command_exists("gh"):
                 raise RuntimeError("לא מצאתי gh. התקן GitHub CLI (gh) ואז נסה שוב.")
 
-            ghp = tool_path("gh")  # e.g. /opt/homebrew/bin/gh
+            ghp = tool_path("gh")
             script = f'''
 tell application "Terminal"
     activate
@@ -484,7 +497,7 @@ end tell
                 pr_title = f"Add event: {title} ({date})"
                 self.push_pr(repo_hint_path=out_dir, pr_title=pr_title)
 
-            # reset
+            # reset form
             self.image_path.set("")
             self.title_var.set("")
             self.ticket_var.set("")
@@ -515,41 +528,27 @@ end tell
     # =============================
     def push_pr(self, repo_hint_path: str | None, pr_title: str | None):
         self.log_line("---- Push + PR ----")
-        self.log_line(f"gh={tool_path('gh')}")
-        self.log_line(f"git={tool_path('git')}")
 
         if not command_exists("git"):
             raise RuntimeError("לא מצאתי git. התקן GitHub Desktop או Xcode Command Line Tools.")
         if not command_exists("gh"):
             raise RuntimeError("לא מצאתי gh. התקן GitHub CLI (gh).")
 
-        start = Path(repo_hint_path) if repo_hint_path else Path(self.out_root.get())
-        repo_root = find_repo_root(start) or find_repo_root(Path.cwd()) or find_repo_root(app_start_dir())
-        if not repo_root:
-            raise RuntimeError("לא מצאתי .git. כדי ש-Push+PR יעבוד צריך Clone אמיתי של הריפו (לא ZIP).")
-
-        repo = str(repo_root)
-        self.log_line(f"Repo: {repo}")
+        repo = self._detect_repo()
+        if not repo:
+            raise RuntimeError("לא מצאתי .git. צריך Clone אמיתי של הריפו (לא ZIP).")
 
         if not gh_authed(repo):
-            do = messagebox.askyesno("לא מחובר ל-GitHub", "gh לא מחובר.\nרוצה להתחבר עכשיו? (ייפתח Terminal)")
-            if do:
-                self.gh_login()
-            raise RuntimeError("צריך להתחבר ל-gh ואז לנסות שוב.")
+            raise RuntimeError("gh לא מחובר. לחץ 'התחבר ל-GitHub' ואז נסה שוב.")
 
-        # must be fork
         ensure_origin_is_fork(repo)
 
-        # Always start from main + align
+        # Always align first
         sync_to_main_local(repo, self.log_line)
         sync_fork_with_upstream(repo, self.log_line)
         sync_to_main_local(repo, self.log_line)
 
-        # changes?
-        p = subprocess.run([tool_path("git"), "status", "--porcelain", "events/"], cwd=repo, text=True, capture_output=True)
-        if p.returncode != 0:
-            raise RuntimeError("git status נכשל.")
-        if not p.stdout.strip():
+        if not has_changes_in_events(repo):
             messagebox.showinfo("אין שינויים", "לא נמצאו שינויים בתוך events/.")
             self.log_line("No changes in events/.")
             return
@@ -557,6 +556,7 @@ end tell
         ts = time.strftime("%Y%m%d-%H%M%S")
         branch = f"partner/events-{ts}"
 
+        # Create branch and commit
         run_cmd([tool_path("git"), "checkout", "-b", branch], cwd=repo, log_fn=self.log_line)
         run_cmd([tool_path("git"), "add", "events/"], cwd=repo, log_fn=self.log_line)
 
@@ -564,18 +564,9 @@ end tell
         run_cmd([tool_path("git"), "commit", "-m", title], cwd=repo, log_fn=self.log_line)
         run_cmd([tool_path("git"), "push", "-u", "origin", branch], cwd=repo, log_fn=self.log_line)
 
-        # fork owner
-        p_owner = subprocess.run(
-            [tool_path("gh"), "repo", "view", "--json", "owner", "-q", ".owner.login"],
-            cwd=repo, text=True, capture_output=True
-        )
-        if p_owner.returncode != 0 or not p_owner.stdout.strip():
-            self.log_line(p_owner.stdout.strip())
-            self.log_line(p_owner.stderr.strip())
-            raise RuntimeError("לא הצלחתי לזהות owner של הפורק (gh repo view).")
-        fork_owner = p_owner.stdout.strip()
-
-        head = f"{fork_owner}:{branch}"
+        # Open PR to upstream
+        owner = fork_owner_login(repo)
+        head = f"{owner}:{branch}"
 
         pr_cmd = [
             tool_path("gh"), "pr", "create",
@@ -595,7 +586,7 @@ end tell
         pr_url = p3.stdout.strip()
         self.log_line(f"PR: {pr_url}")
 
-        # Always go back to main after success
+        # Always go back to main
         try:
             run_cmd([tool_path("git"), "checkout", DEFAULT_BRANCH], cwd=repo, log_fn=self.log_line)
             run_cmd([tool_path("git"), "pull", "--ff-only"], cwd=repo, log_fn=self.log_line)
@@ -612,5 +603,4 @@ end tell
 
 
 if __name__ == "__main__":
-    app = App()
-    app.mainloop()
+    App().mainloop()
