@@ -3,6 +3,8 @@ name: Deploy promo site to GitHub Pages
 on:
   push:
     branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
   workflow_dispatch:
   schedule:
     - cron: "0 2 * * *"
@@ -38,6 +40,11 @@ jobs:
           python tools/promogen.py build
 
       - name: Run site sanity checks
+        env:
+          GRACE_DAYS: "2"
+          MAX_LINKS: "60"
+          LINK_TIMEOUT_SEC: "6"
+          STRICT_LINKS: "0"
         run: |
           python tools/check_site.py
 
@@ -49,9 +56,11 @@ jobs:
           touch site/.nojekyll
 
       - name: Configure Pages
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
 
       - name: Upload artifact
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
           path: site
@@ -59,6 +68,7 @@ jobs:
   deploy:
     runs-on: ubuntu-latest
     needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     environment:
       name: github-pages
     steps:
