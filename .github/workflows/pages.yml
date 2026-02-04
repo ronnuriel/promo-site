@@ -28,9 +28,18 @@ jobs:
         with:
           python-version: "3.11"
 
+      - name: Setup Node (for JS syntax check)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
       - name: Generate events index
         run: |
           python tools/promogen.py build
+
+      - name: Run site sanity checks
+        run: |
+          python tools/check_site.py
 
       - name: Prepare site folder
         run: |
