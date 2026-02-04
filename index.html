@@ -234,7 +234,7 @@
         <option value="newest">עבר: הכי חדש למעלה</option>
         <option value="oldest">עבר: הכי ישן למעלה</option>
       </select>
-      <a class="btn ghost" href="https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ" target="_blank" rel="noopener">
+      <a class="btn ghost" href="https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ" target="_blank" rel="noopener" data-join="1">
         👥 להצטרפות לקהילה
       </a>
     </div>
@@ -298,6 +298,38 @@
   // holds folder -> { folder, meta, dt }
   const EVENT_MAP = new Map();
 
+  // ---------- GA helpers ----------
+  function gaEvent(name, params){
+    try {
+      if (typeof gtag === "function") gtag("event", name, params || {});
+    } catch {}
+  }
+
+  function trackTicketClick(folder, e){
+    gaEvent("ticket_click", {
+      event_folder: folder,
+      event_title: e?.title || "",
+      event_date: e?.date || "",
+      event_location: e?.location || "",
+      link_url: e?.ticket_url || ""
+    });
+  }
+
+  function trackCouponCopy(folder, e, coupon){
+    gaEvent("copy_coupon", {
+      event_folder: folder,
+      event_title: e?.title || "",
+      event_date: e?.date || "",
+      coupon_code: coupon || ""
+    });
+  }
+
+  function trackJoinCommunity(){
+    gaEvent("join_community_click", {
+      link_url: "https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ"
+    });
+  }
+
   function showToast(msg){
     toastEl.textContent = msg;
     toastEl.classList.add('show');
@@ -332,7 +364,7 @@
   function pad2(n){ return String(n).padStart(2,'0'); }
   function icsDateLocal(d){
     // YYYYMMDDTHHMMSS
-    return `${d.getFullYear()}${pad2(d.getMonth()+1)}${pad2(d.getDate())}T${pad2(d.getHours())}${pad2(d.getMinutes())}00`;
+    return `${d.getFullYear()}${pad2(d.getMonth()+1)}${pad2(d.getDate())}T${pad2(d.getHours())${pad2(d.getMinutes())}00`;
   }
   function icsEscape(s){
     return String(s ?? '')
@@ -399,7 +431,7 @@
     setTimeout(() => URL.revokeObjectURL(url), 1200);
 
     showToast("📅 הקובץ ירד ליומן");
-    try { gtag('event', 'add_to_calendar', { event_folder: folder }); } catch {}
+    gaEvent('add_to_calendar', { event_folder: folder, event_title: item.meta?.title || "" });
   }
 
   function card(e, folder, isPast) {
@@ -412,16 +444,21 @@
 
     const imagePath = e.image ? `events/${folder}/${e.image}` : '';
     const couponBtn = e.coupon_code ? `
-      <button class="btn copy-btn" data-copy="${esc(e.coupon_code)}">🎟️ העתק קופון</button>
+      <button class="btn copy-btn"
+              data-copy="${esc(e.coupon_code)}"
+              data-folder="${esc(folder)}">🎟️ העתק קופון</button>
     ` : '';
 
-    const ticketsBtn = (e.ticket_url && !isPast) ? `
-      <a class="btn primary" href="${esc(e.ticket_url)}" target="_blank" rel="noopener">כרטיסים</a>
-    ` : (e.ticket_url && isPast) ? `
-      <a class="btn primary" href="${esc(e.ticket_url)}" target="_blank" rel="noopener">לינק לאירוע</a>
+    const ticketsBtn = (e.ticket_url) ? `
+      <a class="btn primary"
+         href="${esc(e.ticket_url)}"
+         target="_blank" rel="noopener"
+         data-ticket="1"
+         data-folder="${esc(folder)}">
+         ${isPast ? 'לינק לאירוע' : 'כרטיסים'}
+      </a>
     ` : '';
 
-    // ✅ Add to calendar (works for upcoming; you can allow past too, but usually not needed)
     const calendarBtn = !isPast ? `
       <button class="btn ics-btn" data-folder="${esc(folder)}">📅 הוסף ליומן</button>
     ` : '';
@@ -464,14 +501,17 @@
   }
 
   function wireButtons() {
-    // copy coupon -> toast
+    // copy coupon -> toast + GA
     document.querySelectorAll('[data-copy]').forEach(btn => {
       btn.addEventListener('click', async () => {
         const code = btn.getAttribute('data-copy');
+        const folder = btn.getAttribute('data-folder') || '';
+        const item = EVENT_MAP.get(folder);
+
         try {
           await navigator.clipboard.writeText(code);
           showToast('✅ קופון הועתק');
-          try { gtag('event', 'copy_coupon', { coupon: code }); } catch {}
+          trackCouponCopy(folder, item?.meta || {}, code);
         } catch {
           alert('לא הצלחתי להעתיק אוטומטית. הקוד: ' + code);
         }
@@ -484,6 +524,20 @@
         const folder = btn.getAttribute('data-folder');
         downloadICS(folder);
       });
+    });
+
+    // ticket click tracking
+    document.querySelectorAll('[data-ticket="1"]').forEach(a => {
+      a.addEventListener('click', () => {
+        const folder = a.getAttribute('data-folder') || '';
+        const item = EVENT_MAP.get(folder);
+        trackTicketClick(folder, item?.meta || {});
+      });
+    });
+
+    // join community tracking
+    document.querySelectorAll('[data-join="1"]').forEach(a => {
+      a.addEventListener('click', () => trackJoinCommunity());
     });
   }
 
