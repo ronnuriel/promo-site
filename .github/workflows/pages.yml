@@ -55,11 +55,21 @@ jobs:
           cp -R events site/events
           touch site/.nojekyll
 
+      # ✅ PR preview artifact (downloadable) — lets you view site before merge
+      - name: Upload PR preview artifact
+        if: github.event_name == 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: promo-site-preview
+          path: site
+          retention-days: 7
+
+      # ✅ Pages deploy artifacts only for main pushes
       - name: Configure Pages
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/configure-pages@v5
 
-      - name: Upload artifact
+      - name: Upload Pages artifact
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
         uses: actions/upload-pages-artifact@v3
         with:
