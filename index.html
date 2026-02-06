@@ -143,6 +143,10 @@
     }
     .pill.soon{ border-color: rgba(0,255,180,.35); box-shadow: 0 0 0 1px rgba(0,255,180,.08) inset; }
     .pill.past{ opacity: .75; }
+    .pill.now{
+      border-color: rgba(255,45,85,.55);
+      box-shadow: 0 0 0 1px rgba(255,45,85,.18) inset;
+    }
 
     .actions{ display:flex; gap:10px; flex-wrap:wrap; margin-top: 4px; }
     .btn{
@@ -186,7 +190,7 @@
       background: rgba(0,0,0,.12);
     }
 
-    /* ✅ Toast */
+    /* Toast */
     .toast{
       position: fixed;
       left: 50%;
@@ -234,7 +238,11 @@
         <option value="newest">עבר: הכי חדש למעלה</option>
         <option value="oldest">עבר: הכי ישן למעלה</option>
       </select>
-      <a class="btn ghost" href="https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ" target="_blank" rel="noopener" data-join="1">
+
+      <a class="btn ghost"
+         href="https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ"
+         target="_blank" rel="noopener"
+         data-join="1">
         👥 להצטרפות לקהילה
       </a>
     </div>
@@ -304,7 +312,6 @@
       if (typeof gtag === "function") gtag("event", name, params || {});
     } catch {}
   }
-
   function trackTicketClick(folder, e){
     gaEvent("ticket_click", {
       event_folder: folder,
@@ -314,7 +321,6 @@
       link_url: e?.ticket_url || ""
     });
   }
-
   function trackCouponCopy(folder, e, coupon){
     gaEvent("copy_coupon", {
       event_folder: folder,
@@ -323,7 +329,6 @@
       coupon_code: coupon || ""
     });
   }
-
   function trackJoinCommunity(){
     gaEvent("join_community_click", {
       link_url: "https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ"
@@ -360,10 +365,29 @@
     return Math.floor((a - b) / ms);
   }
 
+  // ---------- "NOW" window: until 07:00 next day ----------
+  function eventNowWindowEnd(startDt){
+    const end = new Date(startDt);
+    // If event starts between 00:00-06:59 -> end is 07:00 same day.
+    if (startDt.getHours() < 7) {
+      end.setHours(7,0,0,0);
+    } else {
+      end.setDate(end.getDate() + 1);
+      end.setHours(7,0,0,0);
+    }
+    return end;
+  }
+
+  function getEventStatus(dtStart, now){
+    const endNow = eventNowWindowEnd(dtStart);
+    const isNow = now >= dtStart && now < endNow;
+    const isPast = now >= endNow;
+    return { isNow, isPast, endNow };
+  }
+
   // ---------- ICS (Add to Calendar) ----------
   function pad2(n){ return String(n).padStart(2,'0'); }
   function icsDateLocal(d){
-    // YYYYMMDDTHHMMSS
     return `${d.getFullYear()}${pad2(d.getMonth()+1)}${pad2(d.getDate())}T${pad2(d.getHours())}${pad2(d.getMinutes())}00`;
   }
   function icsEscape(s){
@@ -376,7 +400,6 @@
   function buildICS(folder, e){
     const tz = "Asia/Jerusalem";
     const dtStart = parseLocalDate(e.date, e.time);
-    // default duration: 4 hours
     const dtEnd = new Date(dtStart.getTime() + 4 * 60 * 60 * 1000);
 
     const title = e.title || "Event";
@@ -434,15 +457,16 @@
     gaEvent('add_to_calendar', { event_folder: folder, event_title: item.meta?.title || "" });
   }
 
-  function card(e, folder, isPast) {
+  function card(e, folder, status) {
     const dt = parseLocalDate(e.date, e.time);
     const now = new Date();
     const diff = daysDiff(dt, now);
 
-    const pillText = isPast ? 'הסתיים' : (diff <= 7 ? 'בשבוע הקרוב' : 'בקרוב');
-    const pillClass = isPast ? 'past' : 'soon';
+    const pillText = status.isNow ? 'עכשיו' : (status.isPast ? 'הסתיים' : (diff <= 7 ? 'בשבוע הקרוב' : 'בקרוב'));
+    const pillClass = status.isNow ? 'now' : (status.isPast ? 'past' : 'soon');
 
     const imagePath = e.image ? `events/${folder}/${e.image}` : '';
+
     const couponBtn = e.coupon_code ? `
       <button class="btn copy-btn"
               data-copy="${esc(e.coupon_code)}"
@@ -455,11 +479,11 @@
          target="_blank" rel="noopener"
          data-ticket="1"
          data-folder="${esc(folder)}">
-         ${isPast ? 'לינק לאירוע' : 'כרטיסים'}
+         ${status.isPast ? 'לינק לאירוע' : 'כרטיסים'}
       </a>
     ` : '';
 
-    const calendarBtn = !isPast ? `
+    const calendarBtn = !status.isPast ? `
       <button class="btn ics-btn" data-folder="${esc(folder)}">📅 הוסף ליומן</button>
     ` : '';
 
@@ -561,24 +585,36 @@
     const now = new Date();
     const items = applySearch(all);
 
-    let upcoming = items.filter(x => x.dt >= now);
-    let past = items.filter(x => x.dt < now);
+    const nowItems = [];
+    const upcoming = [];
+    const past = [];
 
-    // sort upcoming
+    for (const x of items) {
+      const st = getEventStatus(x.dt, now);
+      x.status = st;
+      if (st.isNow) nowItems.push(x);
+      else if (st.isPast) past.push(x);
+      else upcoming.push(x);
+    }
+
+    // keep NOW always on top
+    nowItems.sort((a,b) => a.dt - b.dt);
+
+    // sort upcoming by chosen order
     const s = sortEl.value;
     upcoming.sort((a,b) => s === 'asc' ? (a.dt - b.dt) : (b.dt - a.dt));
 
-    // sort past
+    // sort past by chosen order
     const ps = pastSortEl.value;
     past.sort((a,b) => ps === 'newest' ? (b.dt - a.dt) : (a.dt - b.dt));
 
-    upcomingGrid.innerHTML = upcoming.map(x => card(x.meta, x.folder, false)).join('');
-    pastGrid.innerHTML = past.map(x => card(x.meta, x.folder, true)).join('');
+    upcomingGrid.innerHTML = [...nowItems, ...upcoming].map(x => card(x.meta, x.folder, x.status)).join('');
+    pastGrid.innerHTML = past.map(x => card(x.meta, x.folder, x.status)).join('');
 
-    upcomingEmpty.style.display = upcoming.length ? 'none' : 'block';
+    upcomingEmpty.style.display = (nowItems.length || upcoming.length) ? 'none' : 'block';
     pastEmpty.style.display = past.length ? 'none' : 'block';
 
-    upcomingCount.textContent = `${upcoming.length} אירועים`;
+    upcomingCount.textContent = `${nowItems.length ? `🔥 ${nowItems.length} עכשיו • ` : ''}${(nowItems.length + upcoming.length)} אירועים`;
     pastCount.textContent = `${past.length} אירועים`;
 
     wireButtons();
@@ -594,7 +630,7 @@
       try {
         const meta = await fetchJson(`events/${folder}/meta.json`);
         const dt = parseLocalDate(meta.date, meta.time);
-        const item = { folder, meta, dt };
+        const item = { folder, meta, dt, status: null };
         all.push(item);
         EVENT_MAP.set(folder, item);
       } catch (e) {
