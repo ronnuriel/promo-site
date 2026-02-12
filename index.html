@@ -371,27 +371,30 @@
   }
 
   // ---------- GA helpers (FIXED PARAMS) ----------
+  // ---------- GA helpers (FIXED PARAMS) ----------
   function gaEvent(name, params){
-    try { if (typeof gtag === "function") gtag("event", name, params || {}); } catch {}
+    try {
+      if (typeof gtag === "function") gtag("event", name, params || {});
+    } catch {}
   }
 
-  // ✅ תמיד שולחים גם event_folder_t וגם event_title_tix כדי שלא יהיה (not set)
-function trackTicketClick(folder, e){
-  gaEvent("ticket_click", {
-    event_folder: folder,
-    event_title: e?.title || "",
-    event_date: e?.date || "",
-    event_location: e?.location || "",
-    link_url: e?.ticket_url || ""
-  });
-}
+  function trackTicketClick(folder, e){
+    gaEvent("ticket_click", {
+      event_folder: folder,
+      event_title: e?.title || "",
+      event_date: e?.date || "",
+      event_location: e?.location || "",
+      link_url: e?.ticket_url || ""
+    });
+  }
 
   function trackCouponCopy(folder, e, coupon){
-gaEvent("copy_coupon", {
-  event_folder: folder,
-  event_title: item?.meta?.title || "",
-  coupon_code: code
-});
+    gaEvent("copy_coupon", {
+      event_folder: folder,
+      event_title: e?.title || "",
+      coupon_code: coupon || ""
+    });
+  }
 
   function trackJoinCommunity(){
     gaEvent("join_community_click", {
