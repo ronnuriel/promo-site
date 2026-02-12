@@ -95,7 +95,6 @@
       position:relative;
     }
 
-    /* images: blurred background + contain main image */
     .imgWrap{
       width:100%;
       aspect-ratio: 16 / 9;
@@ -305,33 +304,7 @@
   // holds folder -> { folder, meta, dt }
   const EVENT_MAP = new Map();
 
-  // ---------- GA helpers ----------
-  function gaEvent(name, params){
-    try { if (typeof gtag === "function") gtag("event", name, params || {}); } catch {}
-  }
-  function trackTicketClick(folder, e){
-    gaEvent("ticket_click", {
-      event_folder: folder,
-      event_title: e?.title || "",
-      event_date: e?.date || "",
-      event_location: e?.location || "",
-      link_url: e?.ticket_url || ""
-    });
-  }
-  function trackCouponCopy(folder, e, coupon){
-    gaEvent("copy_coupon", {
-      event_folder: folder,
-      event_title: e?.title || "",
-      event_date: e?.date || "",
-      coupon_code: coupon || ""
-    });
-  }
-  function trackJoinCommunity(){
-    gaEvent("join_community_click", {
-      link_url: "https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ"
-    });
-  }
-
+  // ---------- UI helpers ----------
   function showToast(msg){
     toastEl.textContent = msg;
     toastEl.classList.add('show');
@@ -362,7 +335,6 @@
     return Math.floor((a - b) / ms);
   }
 
-  // ---- helpers: today/tomorrow ----
   function startOfDay(d){
     const x = new Date(d);
     x.setHours(0,0,0,0);
@@ -382,7 +354,6 @@
   // ---------- "NOW" window: until 07:00 next day ----------
   function eventNowWindowEnd(startDt){
     const end = new Date(startDt);
-    // If event starts between 00:00-06:59 -> end is 07:00 same day.
     if (startDt.getHours() < 7) {
       end.setHours(7,0,0,0);
     } else {
@@ -397,6 +368,37 @@
     const isNow = now >= dtStart && now < endNow;
     const isPast = now >= endNow;
     return { isNow, isPast, endNow };
+  }
+
+  // ---------- GA helpers (FIXED PARAMS) ----------
+  function gaEvent(name, params){
+    try { if (typeof gtag === "function") gtag("event", name, params || {}); } catch {}
+  }
+
+  // ✅ תמיד שולחים גם event_folder_t וגם event_title_tix כדי שלא יהיה (not set)
+  function trackTicketClick(folder, e){
+    gaEvent("ticket_click", {
+      event_folder_t: folder,
+      event_title_tix: e?.title || "",
+      event_date: e?.date || "",
+      event_location: e?.location || "",
+      link_url: e?.ticket_url || ""
+    });
+  }
+
+  function trackCouponCopy(folder, e, coupon){
+    gaEvent("copy_coupon", {
+      event_folder_t: folder,
+      event_title_tix: e?.title || "",
+      event_date: e?.date || "",
+      coupon_code: coupon || ""
+    });
+  }
+
+  function trackJoinCommunity(){
+    gaEvent("join_community_click", {
+      link_url: "https://chat.whatsapp.com/J8ntxdUO1hWAPfgK5m7lSQ"
+    });
   }
 
   // ---------- ICS (Add to Calendar) ----------
@@ -414,7 +416,6 @@
   function buildICS(folder, e){
     const tz = "Asia/Jerusalem";
     const dtStart = parseLocalDate(e.date, e.time);
-    // default duration: 4 hours
     const dtEnd = new Date(dtStart.getTime() + 4 * 60 * 60 * 1000);
 
     const title = e.title || "Event";
@@ -469,34 +470,26 @@
     setTimeout(() => URL.revokeObjectURL(url), 1200);
 
     showToast("📅 הקובץ ירד ליומן");
-    gaEvent('add_to_calendar', { event_folder: folder, event_title: item.meta?.title || "" });
+    gaEvent('add_to_calendar', {
+      event_folder_t: folder,
+      event_title_tix: item.meta?.title || ""
+    });
   }
 
+  // ---------- card ----------
   function card(e, folder, status) {
     const dt = parseLocalDate(e.date, e.time);
     const now = new Date();
     const diff = daysDiff(dt, now);
 
-    // ---- pill logic: עכשיו / היום / מחר ----
     let pillText = 'בקרוב';
     let pillClass = 'soon';
 
-    if (status.isNow) {
-      pillText = 'עכשיו';
-      pillClass = 'now';
-    } else if (status.isPast) {
-      pillText = 'הסתיים';
-      pillClass = 'past';
-    } else if (isSameDay(dt, now)) {
-      pillText = 'היום';
-      pillClass = 'now';
-    } else if (isTomorrow(dt, now)) {
-      pillText = 'מחר';
-      pillClass = 'soon';
-    } else {
-      pillText = (diff <= 7 ? 'בשבוע הקרוב' : 'בקרוב');
-      pillClass = 'soon';
-    }
+    if (status.isNow) { pillText = 'עכשיו'; pillClass = 'now'; }
+    else if (status.isPast) { pillText = 'הסתיים'; pillClass = 'past'; }
+    else if (isSameDay(dt, now)) { pillText = 'היום'; pillClass = 'now'; }
+    else if (isTomorrow(dt, now)) { pillText = 'מחר'; pillClass = 'soon'; }
+    else { pillText = (diff <= 7 ? 'בשבוע הקרוב' : 'בקרוב'); pillClass = 'soon'; }
 
     const imagePath = e.image ? `events/${folder}/${e.image}` : '';
 
@@ -557,46 +550,55 @@
     `;
   }
 
-  function wireButtons() {
-    // copy coupon -> toast + GA
-    document.querySelectorAll('[data-copy]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        const code = btn.getAttribute('data-copy');
-        const folder = btn.getAttribute('data-folder') || '';
-        const item = EVENT_MAP.get(folder);
+  // ✅ IMPORTANT: no more wireButtons per render (prevents duplicates)
+  // We handle clicks globally with event delegation below.
 
-        try {
-          await navigator.clipboard.writeText(code);
-          showToast('✅ קופון הועתק');
-          trackCouponCopy(folder, item?.meta || {}, code);
-        } catch {
-          alert('לא הצלחתי להעתיק אוטומטית. הקוד: ' + code);
-        }
-      });
-    });
+  // ---------- GLOBAL CLICK HANDLER (FIXES "works only in console") ----------
+  document.addEventListener('click', async (ev) => {
+    // copy coupon
+    const copyBtn = ev.target.closest('[data-copy]');
+    if (copyBtn) {
+      const code = copyBtn.getAttribute('data-copy') || '';
+      const folder = copyBtn.getAttribute('data-folder') || '';
+      const item = EVENT_MAP.get(folder);
+
+      // send GA always (no "not set")
+      trackCouponCopy(folder, item?.meta || {}, code);
+
+      try {
+        await navigator.clipboard.writeText(code);
+        showToast('✅ קופון הועתק');
+      } catch (e) {
+        // still counted in GA above
+        alert('לא הצלחתי להעתיק אוטומטית. הקוד: ' + code);
+      }
+      return;
+    }
 
     // add to calendar
-    document.querySelectorAll('.ics-btn').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const folder = btn.getAttribute('data-folder');
-        downloadICS(folder);
-      });
-    });
+    const icsBtn = ev.target.closest('.ics-btn');
+    if (icsBtn) {
+      const folder = icsBtn.getAttribute('data-folder') || '';
+      downloadICS(folder);
+      return;
+    }
 
-    // ticket click tracking
-    document.querySelectorAll('[data-ticket="1"]').forEach(a => {
-      a.addEventListener('click', () => {
-        const folder = a.getAttribute('data-folder') || '';
-        const item = EVENT_MAP.get(folder);
-        trackTicketClick(folder, item?.meta || {});
-      });
-    });
+    // ticket click
+    const ticketA = ev.target.closest('[data-ticket="1"]');
+    if (ticketA) {
+      const folder = ticketA.getAttribute('data-folder') || '';
+      const item = EVENT_MAP.get(folder);
+      trackTicketClick(folder, item?.meta || {});
+      return;
+    }
 
-    // join community tracking
-    document.querySelectorAll('[data-join="1"]').forEach(a => {
-      a.addEventListener('click', () => trackJoinCommunity());
-    });
-  }
+    // join community
+    const joinA = ev.target.closest('[data-join="1"]');
+    if (joinA) {
+      trackJoinCommunity();
+      return;
+    }
+  });
 
   async function fetchJson(url) {
     const res = await fetch(url, { cache: 'no-store' });
@@ -630,14 +632,11 @@
       else upcoming.push(x);
     }
 
-    // keep NOW always on top
     nowItems.sort((a,b) => a.dt - b.dt);
 
-    // sort upcoming by chosen order
     const s = sortEl.value;
     upcoming.sort((a,b) => s === 'asc' ? (a.dt - b.dt) : (b.dt - a.dt));
 
-    // sort past by chosen order
     const ps = pastSortEl.value;
     past.sort((a,b) => ps === 'newest' ? (b.dt - a.dt) : (a.dt - b.dt));
 
@@ -649,8 +648,6 @@
 
     upcomingCount.textContent = `${nowItems.length ? `🔥 ${nowItems.length} עכשיו • ` : ''}${(nowItems.length + upcoming.length)} אירועים`;
     pastCount.textContent = `${past.length} אירועים`;
-
-    wireButtons();
   }
 
   async function init() {
