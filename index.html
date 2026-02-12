@@ -190,7 +190,6 @@
       background: rgba(0,0,0,.12);
     }
 
-    /* Toast */
     .toast{
       position: fixed;
       left: 50%;
@@ -308,9 +307,7 @@
 
   // ---------- GA helpers ----------
   function gaEvent(name, params){
-    try {
-      if (typeof gtag === "function") gtag("event", name, params || {});
-    } catch {}
+    try { if (typeof gtag === "function") gtag("event", name, params || {}); } catch {}
   }
   function trackTicketClick(folder, e){
     gaEvent("ticket_click", {
@@ -365,6 +362,23 @@
     return Math.floor((a - b) / ms);
   }
 
+  // ---- helpers: today/tomorrow ----
+  function startOfDay(d){
+    const x = new Date(d);
+    x.setHours(0,0,0,0);
+    return x;
+  }
+  function isSameDay(a,b){
+    return a.getFullYear()===b.getFullYear()
+        && a.getMonth()===b.getMonth()
+        && a.getDate()===b.getDate();
+  }
+  function isTomorrow(dt, now){
+    const t = startOfDay(now);
+    t.setDate(t.getDate()+1);
+    return isSameDay(dt, t);
+  }
+
   // ---------- "NOW" window: until 07:00 next day ----------
   function eventNowWindowEnd(startDt){
     const end = new Date(startDt);
@@ -400,6 +414,7 @@
   function buildICS(folder, e){
     const tz = "Asia/Jerusalem";
     const dtStart = parseLocalDate(e.date, e.time);
+    // default duration: 4 hours
     const dtEnd = new Date(dtStart.getTime() + 4 * 60 * 60 * 1000);
 
     const title = e.title || "Event";
@@ -462,8 +477,26 @@
     const now = new Date();
     const diff = daysDiff(dt, now);
 
-    const pillText = status.isNow ? 'עכשיו' : (status.isPast ? 'הסתיים' : (diff <= 7 ? 'בשבוע הקרוב' : 'בקרוב'));
-    const pillClass = status.isNow ? 'now' : (status.isPast ? 'past' : 'soon');
+    // ---- pill logic: עכשיו / היום / מחר ----
+    let pillText = 'בקרוב';
+    let pillClass = 'soon';
+
+    if (status.isNow) {
+      pillText = 'עכשיו';
+      pillClass = 'now';
+    } else if (status.isPast) {
+      pillText = 'הסתיים';
+      pillClass = 'past';
+    } else if (isSameDay(dt, now)) {
+      pillText = 'היום';
+      pillClass = 'now';
+    } else if (isTomorrow(dt, now)) {
+      pillText = 'מחר';
+      pillClass = 'soon';
+    } else {
+      pillText = (diff <= 7 ? 'בשבוע הקרוב' : 'בקרוב');
+      pillClass = 'soon';
+    }
 
     const imagePath = e.image ? `events/${folder}/${e.image}` : '';
 
